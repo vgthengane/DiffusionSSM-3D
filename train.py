@@ -18,6 +18,10 @@ from models.dit3d import DiT3D_models
 from models.dit3d_window_attn import DiT3D_models_WindAttn
 
 from tensorboardX import SummaryWriter
+from eval import generate, evaluate_gen
+import wandb
+import json
+import time
 
 
 '''
@@ -61,6 +65,7 @@ def rotation_matrix(axis, theta):
                      [2 * (bc - ad), aa + cc - bb - dd, 2 * (cd + ab)],
                      [2 * (bd + ac), 2 * (cd - ab), aa + dd - bb - cc]])
 
+
 def rotate(vertices, faces):
     '''
     vertices: [numpoints, 3]
@@ -72,10 +77,12 @@ def rotate(vertices, faces):
     v, f = vertices[:,[1,2,0]].dot(M).dot(N).dot(K), faces[:,[1,2,0]]
     return v, f
 
+
 def norm(v, f):
     v = (v - v.min())/(v.max() - v.min()) - 0.5
 
     return v, f
+
 
 def getGradNorm(net):
     pNorm = torch.sqrt(sum(torch.sum(p ** 2) for p in net.parameters()))
@@ -94,6 +101,7 @@ def weights_init(m):
         m.weight.data.normal_()
         m.bias.data.fill_(0)
 
+
 '''
 models
 '''
@@ -103,6 +111,7 @@ def normal_kl(mean1, logvar1, mean2, logvar2):
     """
     return 0.5 * (-1.0 + logvar2 - logvar1 + torch.exp(logvar1 - logvar2)
                 + (mean1 - mean2)**2 * torch.exp(-logvar2))
+
 
 def discretized_gaussian_log_likelihood(x, *, means, log_scales):
     # Assumes data is integers [0, 1]
@@ -125,6 +134,7 @@ def discretized_gaussian_log_likelihood(x, *, means, log_scales):
              torch.log(torch.max(cdf_delta, torch.ones_like(cdf_delta)*1e-12))))
     assert log_probs.shape == x.shape
     return log_probs
+
 
 class GaussianDiffusion:
     def __init__(self,betas, loss_type, model_mean_type, model_var_type):
@@ -566,19 +576,33 @@ def train(gpu, opt, output_dir, noises_init):
 
     set_seed(opt)
     logger = setup_logging(output_dir)
+    save_dir = os.path.join(output_dir, "checkpoints")
 
     if not opt.debug:
         if opt.use_tb:
             # tb writers
-            tb_writer = SummaryWriter(output_dir)
+            tb_dir = os.path.join(output_dir, "tensorboard")
+            tb_writer = SummaryWriter(tb_dir)
             
-
     if opt.distribution_type == 'multi':
         should_diag = gpu==0
     else:
         should_diag = True
+
     if should_diag:
-        outf_syn, = setup_output_subdirs(output_dir, 'syn')
+        outf_syn, = setup_output_subdirs(output_dir, 'generated_samples')
+        if opt.use_wandb:
+            # dir_suffix =  os.path.basename(output_dir).split("_")[-1]
+            # exp_name_suffix = ("_" + dir_suffix) if dir_suffix.isdigit() else ""
+            # wandb_dir = os.path.join(output_dir, "wandb")
+            # os.makedirs(wandb_dir)
+            wandb.init(
+                entity="vgthengane",
+                project="DiM-3D",
+                config=opt,
+                name=opt.experiment_name,
+                dir=output_dir
+            )
 
     if opt.distribution_type == 'multi':
         if opt.dist_url == "env://" and opt.rank == -1:
@@ -622,7 +646,6 @@ def train(gpu, opt, output_dir, noises_init):
         torch.cuda.set_device(gpu)
         model.cuda(gpu)
         model.multi_gpu_wrapper(_transform_)
-
 
     elif opt.distribution_type == 'single':
         def _transform_(m):
@@ -709,17 +732,21 @@ def train(gpu, opt, output_dir, noises_init):
                 global_step = i + len(dataloader) * epoch
                 if opt.use_tb:
                     tb_writer.add_scalar('train_loss', loss.item(), global_step)
-                    tb_writer.add_scalar('train_lr', optimizer.param_groups[0]['lr'], global_step)
+                    tb_writer.add_scalar('train_lr', optimizer.param_groups[0]['lr'], global_step)                
 
             if i % opt.print_freq == 0 and should_diag:
-
-                logger.info('[{:>3d}/{:>3d}][{:>3d}/{:>3d}]    loss: {:>10.4f},    '
-                             .format(
-                        epoch, opt.niter, i, len(dataloader),loss.item()
-                        ))
-
+                logger.info('[{:>3d}/{:>3d}][{:>3d}/{:>3d}]    loss: {:>10.4f},    '.format(
+                    epoch, opt.niter, i, len(dataloader),loss.item())
+                )
+                if opt.use_wandb:
+                    wandb.log({
+                        'train_loss': loss.item(), 
+                        'global_step': global_step,
+                        'train_lr': optimizer.param_groups[0]['lr']
+                    })
 
         if (epoch + 1) % opt.diagIter == 0 and should_diag:
+            training_stats = {'epoch': epoch}
 
             logger.info('Diagnosis:')
 
@@ -744,8 +771,12 @@ def train(gpu, opt, output_dir, noises_init):
                     tb_writer.add_scalar('terms_bpd', kl_stats['terms_bpd'].item(), epoch)
                     tb_writer.add_scalar('prior_bpd_b', kl_stats['prior_bpd_b'].item(), epoch)
                     tb_writer.add_scalar('mse_bt', kl_stats['mse_bt'].item(), epoch)
-
-
+                training_stats.update({
+                    'total_bpd_b': kl_stats['total_bpd_b'].item(),
+                    'terms_bpd': kl_stats['terms_bpd'].item(),
+                    'prior_bpd_b': kl_stats['prior_bpd_b'].item(),
+                    'mse_bt': kl_stats['mse_bt'].item()
+                })
 
         if (epoch + 1) % opt.vizIter == 0 and should_diag:
             logger.info('Generation: eval')
@@ -768,18 +799,32 @@ def train(gpu, opt, output_dir, noises_init):
                     *gen_eval_range, *gen_stats,
                 ))
 
-            visualize_pointcloud_batch('%s/epoch_%03d_samples_eval.png' % (outf_syn, epoch),
-                                       x_gen_eval.transpose(1, 2), None, None,
-                                       None)
-
-            visualize_pointcloud_batch('%s/epoch_%03d_samples_eval_all.png' % (outf_syn, epoch),
-                                       x_gen_all.transpose(1, 2), None,
-                                       None,
-                                       None)
-
-            visualize_pointcloud_batch('%s/epoch_%03d_x.png' % (outf_syn, epoch), x.transpose(1, 2), None,
-                                       None,
-                                       None)
+            # sample_eval_fig = 
+            visualize_pointcloud_batch('%s/epoch_%04d_samples_eval.png' % (outf_syn, epoch),
+                                       x_gen_eval.transpose(1, 2), None, None,  None)
+            # sample_eval_all_fig = 
+            visualize_pointcloud_batch('%s/epoch_%04d_samples_eval_all.png' % (outf_syn, epoch),
+                                       x_gen_all.transpose(1, 2), None,  None, None)
+            # sample_x_fig = 
+            visualize_pointcloud_batch('%s/epoch_%04d_x.png' % (outf_syn, epoch), 
+                                       x.transpose(1, 2), None, None, None)
+            
+            training_stats.update({
+                "eval_gen_range0": gen_eval_range[0],
+                "eval_gen_range1": gen_eval_range[1],
+                "eval_gen_mean": gen_stats[0].item(),
+                "eval_gen_std": gen_stats[1].item(),
+                # "sample_eval_fig": sample_eval_fig,
+                # "sample_eval_all_fig": sample_eval_all_fig, 
+                # "sample_x_fig": sample_x_fig 
+            })
+            opt.eval_path = os.path.join('%s/samples_%04d.pth' % (outf_syn, epoch))
+            Path(opt.eval_path).parent.mkdir(parents=True, exist_ok=True)
+            # Generate Samples for given epoch
+            ref = generate(model, opt, batch_size=opt.val_bs, epoch=epoch)
+            # Evaluate generation
+            eval_gen_stats = evaluate_gen(opt, ref, logger, batch_size=opt.val_bs)
+            training_stats.update(eval_gen_stats)
 
             logger.info('Generation: train')
             model.train()
@@ -787,8 +832,6 @@ def train(gpu, opt, output_dir, noises_init):
         if (epoch + 1) % opt.saveIter == 0:
 
             if should_diag:
-
-                
                 save_dict = {
                     'epoch': epoch,
                     'model_state': model.state_dict(),
@@ -797,24 +840,26 @@ def train(gpu, opt, output_dir, noises_init):
 
                 if opt.use_ema:
                     save_dict.update({'ema': ema.state_dict()})
-                
+                torch.save(save_dict, '%s/epoch_%04d.pth' % (save_dir, epoch))
 
-                torch.save(save_dict, '%s/epoch_%d.pth' % (output_dir, epoch))
-
+                if opt.use_wandb:
+                    wandb.log(training_stats)
+                with open(os.path.join(output_dir, 'training_stats.json'), 'a') as f:
+                    f.write(json.dumps(training_stats) + '\n')
 
             if opt.distribution_type == 'multi':
                 dist.barrier()
                 map_location = {'cuda:%d' % 0: 'cuda:%d' % gpu}
                 if opt.use_ema:
-                    checkpoint = torch.load('%s/epoch_%d.pth' % (output_dir, epoch), map_location=map_location)['ema']
+                    checkpoint = torch.load('%s/epoch_%04d.pth' % (save_dir, epoch), map_location=map_location)['ema']
                     checkpoint_dict = {k.replace('model.', 'model.module.'): checkpoint[k] for k in checkpoint if k.startswith('model.')}
                     model.load_state_dict(checkpoint_dict)
                 else:
                     model.load_state_dict(
-                    torch.load('%s/epoch_%d.pth' % (output_dir, epoch), map_location=map_location)['model_state'])
+                    torch.load('%s/epoch_%04d.pth' % (save_dir, epoch), map_location=map_location)['model_state'])
                 
-
     dist.destroy_process_group()
+
 
 def main():
     opt = parse_args()
@@ -823,9 +868,13 @@ def main():
         opt.beta_end = 0.008
         opt.schedule_type = 'warm0.1'
 
-    output_dir = get_output_dir(opt.model_dir, opt.experiment_name)
-    copy_source(__file__, output_dir)
+    output_dir = os.path.join(get_output_dir(opt.model_dir, opt.experiment_name), "training")
+    os.makedirs(os.path.join(output_dir, "generated_samples"))
+    os.makedirs(os.path.join(output_dir, "checkpoints"))
+    # os.makedirs(os.path.join(output_dir, "wandb"))    
 
+    copy_source(__file__, output_dir)
+    
     ''' workaround '''
     train_dataset, _ = get_dataset(opt.dataroot, opt.npoints, opt.category)
     noises_init = torch.randn(len(train_dataset), opt.npoints, opt.nc)
@@ -836,6 +885,9 @@ def main():
     opt.dist_url = f'tcp://{opt.node}:{opt.port}'
     print('Using url {}'.format(opt.dist_url))
 
+    # Start the timer
+    start_time = time.time()
+
     if opt.distribution_type == 'multi':
         opt.ngpus_per_node = torch.cuda.device_count()
         opt.world_size = opt.ngpus_per_node * opt.world_size
@@ -843,6 +895,17 @@ def main():
     else:
         train(opt.gpu, opt, output_dir, noises_init)
 
+    # End the timer
+    end_time = time.time()
+    # Calculate the elapsed time in seconds
+    elapsed_time_seconds = end_time - start_time
+
+    # Convert seconds to hours, minutes, and remaining seconds
+    hours, remainder = divmod(elapsed_time_seconds, 3600)
+    minutes, seconds = divmod(remainder, 60)
+
+    # Print the elapsed time
+    print(f"Time taken to train the model: {int(hours)} hours, {int(minutes)} minutes, {int(seconds)} seconds")
 
 
 def parse_args():
@@ -918,12 +981,15 @@ def parse_args():
 
     parser.add_argument('--debug', action='store_true', default=False, help = 'debug mode')
     parser.add_argument('--use_tb', action='store_true', default=False, help = 'use tensorboard')
+    parser.add_argument('--use_wandb', action='store_true', default=False, help = 'use weights and biases')
     parser.add_argument('--use_pretrained', action='store_true', default=False, help = 'use pretrained 2d DiT weights')
     parser.add_argument('--use_ema', action='store_true', default=False, help = 'use ema')
+    parser.add_argument('--val_bs', type=int, default=50, help = 'Validation batch size generate and evaluate after every vizIter')
 
     opt = parser.parse_args()
 
     return opt
+
 
 if __name__ == '__main__':
     main()

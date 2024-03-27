@@ -47,7 +47,17 @@ def get_output_dir(dir_id, exp_id):
     # t = datetime.datetime.now().strftime('%Y-%m-%d-%H-%M-%S')
     output_dir = os.path.join(dir_id, exp_id)
     if not os.path.exists(output_dir):
-        os.makedirs(output_dir)
+        os.makedirs(output_dir, exist_ok=True)
+    # else:
+    #     # Directory already exists, so add an increment to the directory name
+    #     increment = 1
+    #     while True:
+    #         incremented_dir = f"{output_dir}_{increment:02d}"
+    #         if not os.path.exists(incremented_dir):
+    #             output_dir = incremented_dir
+    #             os.makedirs(output_dir)
+    #             break
+    #         increment += 1    
     return output_dir
 
 

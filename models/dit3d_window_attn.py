@@ -19,7 +19,7 @@ from timm.models.vision_transformer import PatchEmbed, Mlp
 from modules.voxelization import Voxelization
 import modules.functional as F
 
-from utils_vit import *
+from models.utils_vit import *
 
 
 def modulate(x, shift, scale):
