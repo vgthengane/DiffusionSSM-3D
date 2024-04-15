@@ -601,7 +601,9 @@ def train(gpu, opt, output_dir, noises_init):
                 project="DiM-3D",
                 config=opt,
                 name=opt.experiment_name,
-                dir=output_dir
+                dir=output_dir,
+                resume=True if (opt.model != '') else False,
+                id='k5gkjcjc' if (opt.wandb_id != '') else None
             )
 
     if opt.distribution_type == 'multi':
@@ -869,8 +871,8 @@ def main():
         opt.schedule_type = 'warm0.1'
 
     output_dir = os.path.join(get_output_dir(opt.model_dir, opt.experiment_name), "training")
-    os.makedirs(os.path.join(output_dir, "generated_samples"))
-    os.makedirs(os.path.join(output_dir, "checkpoints"))
+    os.makedirs(os.path.join(output_dir, "generated_samples"), exist_ok=True)
+    os.makedirs(os.path.join(output_dir, "checkpoints"), exist_ok=True)
     # os.makedirs(os.path.join(output_dir, "wandb"))    
 
     copy_source(__file__, output_dir)
@@ -985,6 +987,7 @@ def parse_args():
     parser.add_argument('--use_pretrained', action='store_true', default=False, help = 'use pretrained 2d DiT weights')
     parser.add_argument('--use_ema', action='store_true', default=False, help = 'use ema')
     parser.add_argument('--val_bs', type=int, default=50, help = 'Validation batch size generate and evaluate after every vizIter')
+    parser.add_argument('--wandb_id', type=str, default=None, help = 'wandb id for resume.')
 
     opt = parser.parse_args()
 

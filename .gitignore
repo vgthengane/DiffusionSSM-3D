@@ -168,3 +168,4 @@ submit_files/*
 NOTES.tasks
 tmp*
 docker*
+wandb/*
