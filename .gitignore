@@ -168,4 +168,7 @@ submit_files/*
 NOTES.tasks
 tmp*
 docker*
+.gitmodules
+wandb/*
+
 wandb/*
