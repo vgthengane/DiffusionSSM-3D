@@ -172,3 +172,5 @@ docker*
 wandb/*
 
 wandb/*
+*.so
+*.sh

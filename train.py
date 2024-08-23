@@ -598,12 +598,12 @@ def train(gpu, opt, output_dir, noises_init):
             # os.makedirs(wandb_dir)
             wandb.init(
                 entity="vgthengane",
-                project="DiM-3D",
+                project="DiffSSM3D",
                 config=opt,
                 name=opt.experiment_name,
                 dir=output_dir,
-                resume=True if (opt.model != '') else False,
-                id='k5gkjcjc' if (opt.wandb_id != '') else None
+                # resume=True if (opt.model != '') else False,
+                # id='k5gkjcjc' if (opt.wandb_id != '') else None
             )
 
     if opt.distribution_type == 'multi':
