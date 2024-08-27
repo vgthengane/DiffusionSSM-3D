@@ -602,8 +602,8 @@ def train(gpu, opt, output_dir, noises_init):
                 config=opt,
                 name=opt.experiment_name,
                 dir=output_dir,
-                # resume=True if (opt.model != '') else False,
-                # id='k5gkjcjc' if (opt.wandb_id != '') else None
+                resume=True if (opt.model != "") else False,
+                id=opt.wandb_id if (opt.wandb_id != "") else None
             )
 
     if opt.distribution_type == 'multi':
@@ -871,8 +871,18 @@ def main():
         opt.schedule_type = 'warm0.1'
 
     output_dir = os.path.join(get_output_dir(opt.model_dir, opt.experiment_name), "training")
+    ckpt_path = os.path.join(output_dir, "checkpoints")
+    if is_folder_exist_and_non_empty(ckpt_path):
+        opt.model = os.path.join(ckpt_path, sorted(os.listdir(ckpt_path))[-1])
+        if opt.wandb_id == "":
+            opt.wandb_id = max(
+                os.listdir(os.path.join(output_dir, "wandb")), 
+                key=lambda d: d.split('/')[-1].split('_')[1]
+            )
+    else:
+        os.makedirs(ckpt_path, exist_ok=True)
+
     os.makedirs(os.path.join(output_dir, "generated_samples"), exist_ok=True)
-    os.makedirs(os.path.join(output_dir, "checkpoints"), exist_ok=True)
     # os.makedirs(os.path.join(output_dir, "wandb"))    
 
     copy_source(__file__, output_dir)

@@ -93,3 +93,8 @@ def setup_output_subdirs(output_dir, *subfolders):
         subfolder_list.append(curr_subf)
 
     return subfolder_list
+
+def is_folder_exist_and_non_empty(folder_path):
+    if os.path.isdir(folder_path) and os.listdir(folder_path):
+        return True
+    return False
