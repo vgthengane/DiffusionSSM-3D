@@ -165,7 +165,7 @@ _data/*
 _experiments/*
 submit_files/*
 .vscode
-NOTES.tasks
+NOTES.**
 tmp*
 docker*
 .gitmodules
@@ -174,3 +174,4 @@ wandb/*
 wandb/*
 *.so
 *.sh
+debug.**
