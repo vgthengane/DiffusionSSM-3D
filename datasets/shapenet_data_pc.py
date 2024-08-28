@@ -42,7 +42,9 @@ class Uniform15KPC(Dataset):
                  random_subsample=False,
                  normalize_std_per_axis=False,
                  all_points_mean=None, all_points_std=None,
-                 input_dim=3, use_mask=False):
+                 input_dim=3, use_mask=False, 
+                 small_exp=False, num_samples=None
+            ):
         self.root_dir = root_dir
         self.split = split
         self.in_tr_sample_size = tr_sample_size
@@ -55,6 +57,9 @@ class Uniform15KPC(Dataset):
         self.box_per_shape = box_per_shape
         if use_mask:
             self.mask_transform = PointCloudMasks(radius=5, elev=5, azim=90)
+
+        self.small_exp = small_exp
+        self.num_samples = num_samples
 
         self.all_cate_mids = []
         self.cate_idx_lst = []
@@ -90,6 +95,17 @@ class Uniform15KPC(Dataset):
         # Shuffle the index deterministically (based on the number of examples)
         self.shuffle_idx = list(range(len(self.all_points)))
         random.Random(38383).shuffle(self.shuffle_idx)
+        
+        if self.small_exp:
+            if self.split == "train":
+                self.shuffle_idx = self.shuffle_idx[:self.num_samples]
+            elif self.split == "val":
+                self.shuffle_idx = self.shuffle_idx[:self.num_samples]
+            else:
+                raise ValueError(f"Provided `{self.split}` as split type, which is invalid.")
+        
+        print(self.shuffle_idx)
+                   
         self.cate_idx_lst = [self.cate_idx_lst[i] for i in self.shuffle_idx]
         self.all_points = [self.all_points[i] for i in self.shuffle_idx]
         self.all_cate_mids = [self.all_cate_mids[i] for i in self.shuffle_idx]
@@ -205,7 +221,7 @@ class ShapeNet15kPointClouds(Uniform15KPC):
                  normalize_std_per_axis=False, box_per_shape=False,
                  random_subsample=False,
                  all_points_mean=None, all_points_std=None,
-                 use_mask=False):
+                 use_mask=False, num_samples=None):
         self.root_dir = root_dir
         self.split = split
         assert self.split in ['train', 'test', 'val']
@@ -221,6 +237,7 @@ class ShapeNet15kPointClouds(Uniform15KPC):
         self.gravity_axis = 1
         self.display_axis_order = [0, 2, 1]
 
+        small_exp = True if num_samples is not None else False
         super(ShapeNet15kPointClouds, self).__init__(
             root_dir, self.synset_ids,
             tr_sample_size=tr_sample_size,
@@ -230,7 +247,8 @@ class ShapeNet15kPointClouds(Uniform15KPC):
             normalize_std_per_axis=normalize_std_per_axis,
             random_subsample=random_subsample,
             all_points_mean=all_points_mean, all_points_std=all_points_std,
-            input_dim=3, use_mask=use_mask)
+            input_dim=3, use_mask=use_mask, 
+            small_exp=small_exp, num_samples=num_samples)
 
 
 

@@ -350,7 +350,8 @@ def get_constrain_function(ground_truth, mask, eps, num_steps=1):
 
 #############################################################################
 
-def get_dataset(dataroot, npoints,category,use_mask=False):
+def get_dataset(dataroot, npoints, category, use_mask=False, 
+                ntrain_samples=None, nval_samples=None):
     tr_dataset = ShapeNet15kPointClouds(root_dir=dataroot,
         categories=[category], split='train',
         tr_sample_size=npoints,
@@ -358,7 +359,7 @@ def get_dataset(dataroot, npoints,category,use_mask=False):
         scale=1.,
         normalize_per_shape=False,
         normalize_std_per_axis=False,
-        random_subsample=True, use_mask = use_mask)
+        random_subsample=True, use_mask = use_mask, num_samples=ntrain_samples)
     te_dataset = ShapeNet15kPointClouds(root_dir=dataroot,
         categories=[category], split='val',
         tr_sample_size=npoints,
@@ -368,7 +369,7 @@ def get_dataset(dataroot, npoints,category,use_mask=False):
         normalize_std_per_axis=False,
         all_points_mean=tr_dataset.all_points_mean,
         all_points_std=tr_dataset.all_points_std,
-        use_mask=use_mask
+        use_mask=use_mask, num_samples=nval_samples
     )
     return tr_dataset, te_dataset
 
@@ -417,7 +418,11 @@ def evaluate_gen(opt, ref_pcs, logger, batch_size):
 
 def generate(model, opt, batch_size=None, epoch=None):
 
-    _, test_dataset = get_dataset(opt.dataroot, opt.npoints, opt.category)
+    kwargs = {
+        "ntrain_samples": opt.ntrain_samples, 
+        "nval_samples": opt.nval_samples
+    } if opt.small_exp else {}
+    _, test_dataset = get_dataset(opt.dataroot, opt.npoints, opt.category, **kwargs)
 
     test_dataloader = torch.utils.data.DataLoader(test_dataset, batch_size=batch_size if batch_size is not None else opt.batch_size,
                                                   shuffle=False, num_workers=int(opt.workers), drop_last=False)

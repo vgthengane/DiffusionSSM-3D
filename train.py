@@ -518,7 +518,7 @@ def get_betas(schedule_type, b_start, b_end, time_num):
     return betas
 
 
-def get_dataset(dataroot, npoints,category):
+def get_dataset(dataroot, npoints,category, ntrain_samples=None, nval_samples=None):
     tr_dataset = ShapeNet15kPointClouds(root_dir=dataroot,
         categories=category.split(','), split='train',
         tr_sample_size=npoints,
@@ -526,7 +526,9 @@ def get_dataset(dataroot, npoints,category):
         scale=1.,
         normalize_per_shape=False,
         normalize_std_per_axis=False,
-        random_subsample=True)
+        random_subsample=True, 
+        num_samples=ntrain_samples
+    )
     te_dataset = ShapeNet15kPointClouds(root_dir=dataroot,
         categories=category.split(','), split='val',
         tr_sample_size=npoints,
@@ -536,6 +538,7 @@ def get_dataset(dataroot, npoints,category):
         normalize_std_per_axis=False,
         all_points_mean=tr_dataset.all_points_mean,
         all_points_std=tr_dataset.all_points_std,
+        num_samples=nval_samples
     )
     return tr_dataset, te_dataset
 
@@ -624,7 +627,11 @@ def train(gpu, opt, output_dir, noises_init):
 
 
     ''' data '''
-    train_dataset, _ = get_dataset(opt.dataroot, opt.npoints, opt.category)
+    kwargs = {
+        "ntrain_samples": opt.ntrain_samples, 
+        "nval_samples": opt.nval_samples
+    } if opt.small_exp else {}
+    train_dataset, _ = get_dataset(opt.dataroot, opt.npoints, opt.category, **kwargs)
     dataloader, _, train_sampler, _ = get_dataloader(opt, train_dataset, None)
 
 
@@ -888,7 +895,11 @@ def main():
     copy_source(__file__, output_dir)
     
     ''' workaround '''
-    train_dataset, _ = get_dataset(opt.dataroot, opt.npoints, opt.category)
+    kwargs = {
+        "ntrain_samples": opt.ntrain_samples, 
+        "nval_samples": opt.nval_samples
+    } if opt.small_exp else {}
+    train_dataset, _ = get_dataset(opt.dataroot, opt.npoints, opt.category, **kwargs)
     noises_init = torch.randn(len(train_dataset), opt.npoints, opt.nc)
 
     # Use random port to avoid collision between parallel jobs
@@ -998,6 +1009,9 @@ def parse_args():
     parser.add_argument('--use_ema', action='store_true', default=False, help = 'use ema')
     parser.add_argument('--val_bs', type=int, default=50, help = 'Validation batch size generate and evaluate after every vizIter')
     parser.add_argument('--wandb_id', type=str, default=None, help = 'wandb id for resume.')
+    parser.add_argument('--small_exp', action='store_true', default=False, help = 'To run small experiment.')
+    parser.add_argument('--ntrain_samples', type=int, default=1000, help = 'No. training samples for small exp.')
+    parser.add_argument('--nval_samples', type=int, default=100, help = 'No. validation samples for small exp.')
 
     opt = parser.parse_args()
 
