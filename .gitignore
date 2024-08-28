@@ -173,5 +173,5 @@ wandb/*
 
 wandb/*
 *.so
-*.sh
+# *.sh
 debug.**
