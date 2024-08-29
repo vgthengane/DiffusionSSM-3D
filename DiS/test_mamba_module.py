@@ -1,5 +1,5 @@
 import torch
-from mamba_ssm import Mamba
+from mamba.mamba_ssm import Mamba
 
 batch, length, dim = 2, 64, 768
 x = torch.randn(batch, length, dim).to("cuda")

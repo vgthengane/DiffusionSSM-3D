@@ -1,5 +1,6 @@
-__version__ = "1.0.1"
+__version__ = "2.2.2"
 
-from mamba_ssm.ops.selective_scan_interface import selective_scan_fn, mamba_inner_fn, bimamba_inner_fn
-from mamba_ssm.modules.mamba_simple import Mamba
-from mamba_ssm.models.mixer_seq_simple import MambaLMHeadModel
+from .ops.selective_scan_interface import selective_scan_fn, mamba_inner_fn, bimamba_inner_fn
+from .modules.mamba_simple import Mamba
+from .modules.mamba2 import Mamba2
+from .models.mixer_seq_simple import MambaLMHeadModel

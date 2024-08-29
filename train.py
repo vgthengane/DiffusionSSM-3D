@@ -17,6 +17,9 @@ from collections import OrderedDict
 from models.dit3d import DiT3D_models
 from models.dit3d_window_attn import DiT3D_models_WindAttn
 
+from models.dis3d import DiS_models
+from models.dis3dv2 import DiS_models as DiS_models2
+
 from tensorboardX import SummaryWriter
 from eval import generate, evaluate_gen
 import wandb
@@ -422,18 +425,37 @@ class Model(nn.Module):
         super(Model, self).__init__()
         self.diffusion = GaussianDiffusion(betas, loss_type, model_mean_type, model_var_type)
 
-        if args.window_size > 0:
-            self.model = DiT3D_models_WindAttn[args.model_type](pretrained=args.use_pretrained, 
-                                                   input_size=args.voxel_size, 
-                                                   window_size=args.window_size, 
-                                                   window_block_indexes=args.window_block_indexes, 
-                                                   num_classes=args.num_classes
-                                                )
-        else:
-            self.model = DiT3D_models[args.model_type](pretrained=args.use_pretrained, 
+        if args.model_type.lower().startswith("dit"):
+            if args.window_size > 0:
+                self.model = DiT3D_models_WindAttn[args.model_type](pretrained=args.use_pretrained, 
                                                     input_size=args.voxel_size, 
+                                                    window_size=args.window_size, 
+                                                    window_block_indexes=args.window_block_indexes, 
                                                     num_classes=args.num_classes
                                                     )
+            else:
+                self.model = DiT3D_models[args.model_type](pretrained=args.use_pretrained, 
+                                                        input_size=args.voxel_size, 
+                                                        num_classes=args.num_classes
+                                                        )
+        elif args.model_type.lower().startswith("dis"):
+            if args.backbone == "disv2":
+                self.model = DiS_models2[args.model_type](
+                    img_size=32,
+                    num_classes=1,
+                    channels=3,
+                )
+                logger.info("Loading Diffusion Model based on Mamba2.")
+            else:
+                self.model = DiS_models[args.model_type](
+                    img_size=32,
+                    num_classes=1,
+                    channels=3,
+                )
+                logger.info("Loading Diffusion Model based on Mamba1 bidirectional.")
+
+        else:
+            raise ValueError(f"Model type {args.model_type} not defined.")
 
 
     def prior_kl(self, x0):
@@ -951,7 +973,7 @@ def parse_args():
     parser.add_argument("--voxel_size", type=int, choices=[16, 32, 64, 128, 256], default=32)
     
     '''model'''
-    parser.add_argument("--model_type", type=str, choices=list(DiT3D_models.keys()), default="DiT-XL/2")
+    parser.add_argument("--model_type", type=str, choices=list(DiT3D_models.keys())+list(DiS_models.keys()), default="DiT-XL/2")
     parser.add_argument('--beta_start', default=0.0001)
     parser.add_argument('--beta_end', default=0.02)
     parser.add_argument('--schedule_type', default='linear')
@@ -1013,6 +1035,8 @@ def parse_args():
     parser.add_argument('--ntrain_samples', type=int, default=1000, help = 'No. training samples for small exp.')
     parser.add_argument('--nval_samples', type=int, default=100, help = 'No. validation samples for small exp.')
 
+    parser.add_argument('--backbone', type=str, default="dit", choices=['dit', 'dis', "disv2"], help="Model to choose")
+    
     opt = parser.parse_args()
 
     return opt

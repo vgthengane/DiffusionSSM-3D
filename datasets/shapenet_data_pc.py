@@ -103,8 +103,6 @@ class Uniform15KPC(Dataset):
                 self.shuffle_idx = self.shuffle_idx[:self.num_samples]
             else:
                 raise ValueError(f"Provided `{self.split}` as split type, which is invalid.")
-        
-        print(self.shuffle_idx)
                    
         self.cate_idx_lst = [self.cate_idx_lst[i] for i in self.shuffle_idx]
         self.all_points = [self.all_points[i] for i in self.shuffle_idx]

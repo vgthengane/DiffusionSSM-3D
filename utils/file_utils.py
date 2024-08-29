@@ -46,8 +46,8 @@ def setup_logging(output_dir):
 def get_output_dir(dir_id, exp_id):
     # t = datetime.datetime.now().strftime('%Y-%m-%d-%H-%M-%S')
     output_dir = os.path.join(dir_id, exp_id)
-    if not os.path.exists(output_dir):
-        os.makedirs(output_dir, exist_ok=True)
+    # if not os.path.exists(output_dir):
+    os.makedirs(output_dir, exist_ok=True)
     # else:
     #     # Directory already exists, so add an increment to the directory name
     #     increment = 1

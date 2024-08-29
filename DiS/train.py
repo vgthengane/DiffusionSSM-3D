@@ -19,11 +19,13 @@ from copy import deepcopy
 from PIL import Image
 from tqdm import tqdm 
 from torchvision.utils import save_image
-from diffusers.models import AutoencoderKL 
+# from diffusers.models import AutoencoderKL 
 
 from models_dis import DiS_models 
+# from models_dis2 import DiS_models
+from DiT.models import DiT_models
 from diffusion import create_diffusion
-from tools.dataset import CelebADataset 
+# from tools.dataset import CelebADataset 
 
 @torch.no_grad()
 def update_ema(ema_model, model, decay=0.9999):
@@ -85,15 +87,21 @@ def adjust_learning_rate(optimizer, epoch, args):
 
 def main(args): 
     # Setup DDP
-    dist.init_process_group("nccl")
-    assert args.global_batch_size % dist.get_world_size() == 0, f"Batch size must be divisible by world size."
-    rank = dist.get_rank()
-    device = rank % torch.cuda.device_count()
-    seed = args.global_seed * dist.get_world_size() + rank
-    torch.manual_seed(seed)
-    torch.cuda.set_device(device)
-    print(f"Starting rank={rank}, seed={seed}, world_size={dist.get_world_size()}.")
-    print(args)
+    if args.distributed:
+        dist.init_process_group("nccl")
+        assert args.global_batch_size % dist.get_world_size() == 0, f"Batch size must be divisible by world size."
+        rank = dist.get_rank()
+        device = rank % torch.cuda.device_count()
+        seed = args.global_seed * dist.get_world_size() + rank
+        torch.manual_seed(seed)
+        torch.cuda.set_device(device)
+        print(f"Starting rank={rank}, seed={seed}, world_size={dist.get_world_size()}.")
+        batch_size = int(args.global_batch_size // dist.get_world_size())
+        print(args)
+
+    else:
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        rank = 0
 
     # Setup an experiment folder
     if rank == 0:
@@ -118,6 +126,12 @@ def main(args):
             num_classes=args.num_classes,
             channels=3,
         ) 
+        
+        # model = DiT_models["DiT-S/2"](
+        #     input_size=32,
+        #     num_classes=-1,
+        #     in_channels=3
+        # )
 
     if args.resume is not None:
         print('resume model')
@@ -128,7 +142,10 @@ def main(args):
     ema = deepcopy(model).to(device)  # Create an EMA of the model for use after training
     requires_grad(ema, False)
 
-    model = DDP(model.to(device), device_ids=[rank]) 
+    model = model.to(device)
+    if args.distributed:
+        model = DDP(model, device_ids=[rank])
+    # model = DDP(model.to(device), device_ids=[rank]) 
     diffusion = create_diffusion(timestep_respacing="")  # default: 1000 steps, linear noise schedule 
 
     if args.latent_space == True: 
@@ -162,7 +179,7 @@ def main(args):
         dataset = torchvision.datasets.CIFAR10(
             root=args.data_path,
             train=True,
-            download=False,
+            download=True,
             transform=transform,
         )
     elif args.dataset_type == "imagenet": 
@@ -177,25 +194,30 @@ def main(args):
         )
 
 
-    sampler = DistributedSampler(
-        dataset,
-        num_replicas=dist.get_world_size(),
-        rank=rank,
-        shuffle=True,
-        seed=args.global_seed
-    )
+    if args.distributed:
+        sampler = DistributedSampler(
+            dataset,
+            num_replicas=dist.get_world_size(),
+            rank=rank,
+            shuffle=True,
+            seed=args.global_seed
+        )
+        shuffle = False
+    else:
+        sampler = None
+        shuffle = True
 
     loader = DataLoader(
         dataset,
-        batch_size=int(args.global_batch_size // dist.get_world_size()),
-        shuffle=False,
+        batch_size=batch_size if args.distributed else args.global_batch_size,
+        shuffle=shuffle,
         sampler=sampler,
         num_workers=args.num_workers,
         pin_memory=True,
         drop_last=True
     )
 
-    update_ema(ema, model.module, decay=0) 
+    update_ema(ema, model.module if args.distributed else model, decay=0) 
     model.train() 
     ema.eval()
 
@@ -205,7 +227,8 @@ def main(args):
     running_loss = 0
 
     for epoch in range(args.epochs): 
-        sampler.set_epoch(epoch) 
+        if args.distributed:
+            sampler.set_epoch(epoch) 
         running_loss = 0
         train_steps = 0
         with tqdm(enumerate(loader), total=len(loader)) as tq:
@@ -228,6 +251,8 @@ def main(args):
                     labels = None 
                 
                 model_kwargs = dict(labels=labels) 
+                # model_kwargs = dict(y=labels) 
+
                 loss_dict = diffusion.training_losses(model, x, t, model_kwargs)
                 loss = loss_dict["loss"].mean()
                 loss_value = loss.item() 
@@ -242,7 +267,7 @@ def main(args):
                 torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
                 
                 opt.step()
-                update_ema(ema, model.module)
+                update_ema(ema, model.module if args.distributed else model)
 
                 running_loss += loss_value
                 log_steps += 1
@@ -252,6 +277,9 @@ def main(args):
                 tq.set_postfix(loss=running_loss / train_steps)
                 # Save DiT checkpoint:
                 if train_steps % args.ckpt_every == 0 and train_steps > 0:
+                    if args.distributed:
+                        dist.barrier()
+
                     if rank == 0:
                         checkpoint = {
                             "model": model.module.state_dict(),
@@ -261,7 +289,7 @@ def main(args):
                         }
                         checkpoint_path = f"{checkpoint_dir}/{train_steps:07d}.pt"
                         torch.save(checkpoint, checkpoint_path) 
-                    dist.barrier()
+                    # dist.barrier()
                 # break 
                 """
                 # debug for ignored parameters 
@@ -272,7 +300,9 @@ def main(args):
                 
                 # eval 
                 if train_steps % args.eval_steps == 0: 
-                    dist.barrier()
+                    if args.distributed:
+                        dist.barrier()  
+                    # dist.barrier()
                     if rank == 0:
                         diffusion_eval = create_diffusion(str(10)) 
 
@@ -312,7 +342,9 @@ def main(args):
                             pass 
                         save_image(eval_samples, os.path.join(experiment_dir, "sample_" + str(train_steps // args.eval_steps) + ".png"), nrow=4, normalize=True, value_range=(-1, 1))
                         
-                    dist.barrier()
+                    if args.distributed:
+                        dist.barrier()  
+                    # dist.barrier()
 
 
 
@@ -341,6 +373,7 @@ if __name__ == "__main__":
     parser.add_argument('--eval_steps', default=1000, type=int,) 
 
     parser.add_argument('--latent_space', type=bool, default=False) 
-    parser.add_argument('--vae_path', type=str, default='/TrainData/Multimodal/zhengcong.fei/dis/vae') 
+    # parser.add_argument('--vae_path', type=str, default='/TrainData/Multimodal/zhengcong.fei/dis/vae') 
+    parser.add_argument("--distributed", action="store_true", help="Use distributed training.")
     args = parser.parse_args()
     main(args)
