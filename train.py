@@ -1,3 +1,6 @@
+import os
+os.environ['TORCH_CUDA_ARCH_LIST'] = '7.0;7.5;8.0;8.6'
+
 import torch.multiprocessing as mp
 import torch.nn as nn
 import torch.optim as optim
@@ -877,6 +880,8 @@ def train(gpu, opt, output_dir, noises_init):
                     wandb.log(training_stats)
                 with open(os.path.join(output_dir, 'training_stats.json'), 'a') as f:
                     f.write(json.dumps(training_stats) + '\n')
+                with open(os.path.join(output_dir, 'eval_stats.txt'), 'a') as f:
+                    f.write(json.dumps(format_eval_stats(epoch, eval_gen_stats)) + '\n')
 
             if opt.distribution_type == 'multi':
                 dist.barrier()
@@ -912,6 +917,8 @@ def main():
         os.makedirs(ckpt_path, exist_ok=True)
 
     os.makedirs(os.path.join(output_dir, "generated_samples"), exist_ok=True)
+    with open(os.path.join(output_dir, 'eval_stats.txt'), 'w+') as f:
+        f.write('Epoch,JSD,CON-CD,CONV-EMB,1NN-CD,1NN-EMD' + '\n')
     # os.makedirs(os.path.join(output_dir, "wandb"))    
 
     copy_source(__file__, output_dir)
@@ -948,6 +955,8 @@ def main():
     # Convert seconds to hours, minutes, and remaining seconds
     hours, remainder = divmod(elapsed_time_seconds, 3600)
     minutes, seconds = divmod(remainder, 60)
+    with open(os.path.join(output_dir, 'eval_stats.txt'), 'a') as f:
+        f.write(f'{int(hours)}, {int(minutes)}m, {int(seconds)}s' + '\n')
 
     # Print the elapsed time
     print(f"Time taken to train the model: {int(hours)} hours, {int(minutes)} minutes, {int(seconds)} seconds")

@@ -98,3 +98,14 @@ def is_folder_exist_and_non_empty(folder_path):
     if os.path.isdir(folder_path) and os.listdir(folder_path):
         return True
     return False
+
+
+                    
+def format_eval_stats(epoch, eval_stats):
+    return f'{epoch},' + \
+            f'{eval_stats['jsd'] * 100:.4f},' + \
+            f'{eval_stats['lgan_cov-CD'] * 100:.2f},' + \
+            f'{eval_stats['lgan_cov-EMD'] * 100:.2f},' + \
+            f'{eval_stats['1-NN-CD-acc'] * 100:.2f},' + \
+            f'{eval_stats['1-NN-EMD-acc'] * 100:.2f}' 
+    
